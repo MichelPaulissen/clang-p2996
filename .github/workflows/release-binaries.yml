@@ -157,32 +157,36 @@ jobs:
 
         echo "target-cmake-flags=$target_cmake_flags" >> $GITHUB_OUTPUT
         echo "build-flang=$build_flang" >> $GITHUB_OUTPUT
-        case "${{ inputs.runs-on }}" in
-          ubuntu-22.04*)
-            build_runs_on="depot-${{ inputs.runs-on }}-16"
-            test_runs_on=$build_runs_on
-            ;;
-          macos-13)
-            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-              build_runs_on="${{ inputs.runs-on }}"
-            else
-              build_runs_on="macos-13-large"
-            fi
-            test_runs_on="${{ inputs.runs-on }}"
-            ;;
-          macos-14)
-            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-              build_runs_on="${{ inputs.runs-on }}"
-            else
-              build_runs_on="depot-macos-14"
-            fi
-            test_runs_on="${{ inputs.runs-on }}"
-            ;;
-          *)
-            test_runs_on="${{ inputs.runs-on }}"
-            build_runs_on=$test_runs_on
-            ;;
-        esac
+        build_runs_on="${{ inputs.runs-on }}"
+        test_runs_on="${{ inputs.runs-on }}"
+        if [ "$GITHUB_REPOSITORY_OWNER" = "llvm" ]; then
+          case "${{ inputs.runs-on }}" in
+            ubuntu-22.04*)
+              build_runs_on="depot-${{ inputs.runs-on }}-16"
+              test_runs_on=$build_runs_on
+              ;;
+            macos-13)
+              if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+                build_runs_on="${{ inputs.runs-on }}"
+              else
+                build_runs_on="macos-13-large"
+              fi
+              test_runs_on="${{ inputs.runs-on }}"
+              ;;
+            macos-14)
+              if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+                build_runs_on="${{ inputs.runs-on }}"
+              else
+                build_runs_on="depot-macos-14"
+              fi
+              test_runs_on="${{ inputs.runs-on }}"
+              ;;
+            *)
+              test_runs_on="${{ inputs.runs-on }}"
+              build_runs_on=$test_runs_on
+              ;;
+          esac
+        fi
         echo "build-runs-on=$build_runs_on" >> $GITHUB_OUTPUT
         echo "test-runs-on=$test_runs_on" >> $GITHUB_OUTPUT
 
