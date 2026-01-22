@@ -52,7 +52,6 @@ jobs:
   prepare:
     name: Prepare to build binaries
     runs-on: ${{ inputs.runs-on }}
-    if: github.repository_owner == 'llvm'
     outputs:
       release-version: ${{ steps.vars.outputs.release-version }}
       ref: ${{ steps.vars.outputs.ref }}
@@ -81,7 +80,7 @@ jobs:
         pip install --require-hashes -r ./llvm/utils/git/requirements.txt
 
     - name: Check Permissions
-      if: github.event_name != 'pull_request'
+      if: github.repository_owner == 'llvm' && github.event_name != 'pull_request'
       env:
         GITHUB_TOKEN: ${{ github.token }}
         USER_TOKEN: ${{ secrets.RELEASE_TASKS_USER_TOKEN }}
@@ -104,7 +103,7 @@ jobs:
         trimmed=$(echo ${{ inputs.release-version }} | xargs)
         if [ -n "$trimmed" ]; then
           release_version="$trimmed"
-          ref="llvmorg-$release_version"
+          ref="$release_version"
         else
           release_version="${{ (github.event_name == 'pull_request' && format('PR{0}', github.event.pull_request.number)) || 'CI'}}-$GITHUB_SHA"
           ref="$GITHUB_SHA"
@@ -190,7 +189,6 @@ jobs:
   build-release-package:
     name: "Build Release Package"
     needs: prepare
-    if: github.repository_owner == 'llvm'
     runs-on: ${{ needs.prepare.outputs.build-runs-on }}
     steps:
 
@@ -315,18 +313,13 @@ jobs:
         name: ${{ needs.prepare.outputs.release-binary-filename }}-attestation
         path: ${{ needs.prepare.outputs.release-binary-filename }}.jsonl
 
-    - name: Install Python Requirements
-      run: |
-        pip install --require-hashes -r ./llvm/utils/git/requirements.txt
-
-    - name: Upload Release
-      shell: bash
-      run: |
-        ./llvm/utils/release/github-upload-release.py \
-        --token ${{ github.token }} \
-        --release ${{ needs.prepare.outputs.release-version }} \
-        upload \
-        --files ${{ needs.prepare.outputs.release-binary-filename }}*
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.prepare.outputs.release-version }}
+        name: ${{ needs.prepare.outputs.release-version }}
+        target_commitish: ${{ needs.prepare.outputs.ref }}
+        files: ${{ needs.prepare.outputs.release-binary-filename }}*
 
   test-release:
     name: "Test Release"
