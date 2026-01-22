@@ -242,11 +242,16 @@ jobs:
       env:
         CCACHE_BIN: ${{ needs.prepare.outputs.ccache }}
       run: |
+        extra_flags=""
+        if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
+          extra_flags="-DCLANG_BOLT=OFF"
+        fi
         # There were some issues on the ARM64 MacOS runners with trying to build x86 object,
         # so we need to set some extra cmake flags to disable this.
         cmake -G Ninja -S llvm -B ${{ steps.setup-stage.outputs.build-prefix }}/build \
             ${{ needs.prepare.outputs.target-cmake-flags }} \
             -C clang/cmake/caches/Release.cmake \
+            $extra_flags \
             -DBOOTSTRAP_LLVM_PARALLEL_LINK_JOBS=1 \
             -DBOOTSTRAP_BOOTSTRAP_CPACK_PACKAGE_FILE_NAME="${{ needs.prepare.outputs.release-binary-basename }}"
 
