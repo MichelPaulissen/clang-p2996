@@ -250,8 +250,8 @@ jobs:
         # so we need to set some extra cmake flags to disable this.
         cmake -G Ninja -S llvm -B ${{ steps.setup-stage.outputs.build-prefix }}/build \
             ${{ needs.prepare.outputs.target-cmake-flags }} \
-            -C clang/cmake/caches/Release.cmake \
             $extra_flags \
+            -C clang/cmake/caches/Release.cmake \
             -DBOOTSTRAP_LLVM_PARALLEL_LINK_JOBS=1 \
             -DBOOTSTRAP_BOOTSTRAP_CPACK_PACKAGE_FILE_NAME="${{ needs.prepare.outputs.release-binary-basename }}"
 
