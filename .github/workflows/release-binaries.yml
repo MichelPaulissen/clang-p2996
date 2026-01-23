@@ -246,6 +246,13 @@ jobs:
         if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
           extra_flags="-DCLANG_BOLT=OFF"
         fi
+        if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
+          cmake -G Ninja -S llvm -B ${{ steps.setup-stage.outputs.build-prefix }}/build \
+              -DLLVM_ENABLE_PROJECTS=clang \
+              -DLLVM_TARGETS_TO_BUILD=Native \
+              -DCMAKE_BUILD_TYPE=Release
+          exit 0
+        fi
         # There were some issues on the ARM64 MacOS runners with trying to build x86 object,
         # so we need to set some extra cmake flags to disable this.
         cmake -G Ninja -S llvm -B ${{ steps.setup-stage.outputs.build-prefix }}/build \
@@ -258,6 +265,12 @@ jobs:
     - name: Build
       shell: bash
       run: |
+        if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
+          ninja -C ${{ steps.setup-stage.outputs.build-prefix }}/build clang
+          tar -C ${{ steps.setup-stage.outputs.build-prefix }}/build -cJf \
+            ${{ needs.prepare.outputs.release-binary-filename }} bin lib/clang
+          exit 0
+        fi
         ninja -v -C ${{ steps.setup-stage.outputs.build-prefix }}/build stage2-package
         release_dir=`find ${{ steps.setup-stage.outputs.build-prefix }}/build -iname 'stage2-bins'`
         mv $release_dir/${{ needs.prepare.outputs.release-binary-filename }} .
