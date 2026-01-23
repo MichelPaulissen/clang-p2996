@@ -247,10 +247,13 @@ jobs:
           extra_flags="-DCLANG_BOLT=OFF"
         fi
         if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
+          install_prefix="${{ steps.setup-stage.outputs.build-prefix }}/install"
           cmake -G Ninja -S llvm -B ${{ steps.setup-stage.outputs.build-prefix }}/build \
               -DLLVM_ENABLE_PROJECTS=clang \
+              -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
               -DLLVM_TARGETS_TO_BUILD=Native \
-              -DCMAKE_BUILD_TYPE=Release
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$install_prefix"
           exit 0
         fi
         # There were some issues on the ARM64 MacOS runners with trying to build x86 object,
@@ -266,9 +269,10 @@ jobs:
       shell: bash
       run: |
         if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
-          ninja -C ${{ steps.setup-stage.outputs.build-prefix }}/build clang
-          tar -C ${{ steps.setup-stage.outputs.build-prefix }}/build -cJf \
-            ${{ needs.prepare.outputs.release-binary-filename }} bin lib/clang
+          install_prefix="${{ steps.setup-stage.outputs.build-prefix }}/install"
+          ninja -C ${{ steps.setup-stage.outputs.build-prefix }}/build clang cxx cxxabi unwind
+          cmake --install ${{ steps.setup-stage.outputs.build-prefix }}/build
+          tar -C "$install_prefix" -cJf ${{ needs.prepare.outputs.release-binary-filename }} .
           exit 0
         fi
         ninja -v -C ${{ steps.setup-stage.outputs.build-prefix }}/build stage2-package
