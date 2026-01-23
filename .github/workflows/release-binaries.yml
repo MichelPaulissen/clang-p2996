@@ -269,10 +269,29 @@ jobs:
       shell: bash
       run: |
         if [ "$GITHUB_REPOSITORY_OWNER" != "llvm" ]; then
-          install_prefix="${{ steps.setup-stage.outputs.build-prefix }}/install"
-          ninja -C ${{ steps.setup-stage.outputs.build-prefix }}/build clang cxx cxxabi unwind
-          cmake --install ${{ steps.setup-stage.outputs.build-prefix }}/build
-          tar -C "$install_prefix" -cJf ${{ needs.prepare.outputs.release-binary-filename }} .
+          build_prefix="${{ steps.setup-stage.outputs.build-prefix }}"
+          stage_dir="$build_prefix/stage"
+          build_dir="$build_prefix/build"
+          ninja -C "$build_dir" clang cxx cxxabi unwind
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir/lib" "$stage_dir/include/c++/v1"
+          cp -a "$build_dir/bin" "$stage_dir/"
+          cp -a "$build_dir/lib/clang" "$stage_dir/lib/"
+          cp -a libcxx/include/* "$stage_dir/include/c++/v1/"
+          if [ -f libcxxabi/include/cxxabi.h ]; then
+            cp -a libcxxabi/include/cxxabi.h "$stage_dir/include/c++/v1/"
+          fi
+          if [ -d libunwind/include ]; then
+            mkdir -p "$stage_dir/include/libunwind"
+            cp -a libunwind/include/* "$stage_dir/include/libunwind/"
+          fi
+          if [ -d "$build_dir/lib/x86_64-unknown-linux-gnu" ]; then
+            mkdir -p "$stage_dir/lib/x86_64-unknown-linux-gnu"
+            cp -a "$build_dir/lib/x86_64-unknown-linux-gnu"/libc++* "$stage_dir/lib/x86_64-unknown-linux-gnu/" || true
+            cp -a "$build_dir/lib/x86_64-unknown-linux-gnu"/libc++abi* "$stage_dir/lib/x86_64-unknown-linux-gnu/" || true
+            cp -a "$build_dir/lib/x86_64-unknown-linux-gnu"/libunwind* "$stage_dir/lib/x86_64-unknown-linux-gnu/" || true
+          fi
+          tar -C "$stage_dir" -cJf ${{ needs.prepare.outputs.release-binary-filename }} .
           exit 0
         fi
         ninja -v -C ${{ steps.setup-stage.outputs.build-prefix }}/build stage2-package

@@ -17,3 +17,8 @@ Steps:
 6) Download and unpack the release:
    - `gh release download 260122 -R MichelPaulissen/clang-p2996 -p LLVM-260122-Linux-X64.tar.xz -D /home/michel/projects/lag/dependencies/clang-p2996/releases/260122`
    - `tar -xJf /home/michel/projects/lag/dependencies/clang-p2996/releases/260122/LLVM-260122-Linux-X64.tar.xz -C /home/michel/projects/lag/dependencies/clang-p2996/releases/260122`
+
+Local binaries:
+- Binaries live under `releases/<tag>/bin` and `releases/<tag>/lib/clang`.
+- Do not commit binaries to git; use GitHub Releases.
+- Helper script: `scripts/fetch_release.py` (downloads and unpacks a release).
