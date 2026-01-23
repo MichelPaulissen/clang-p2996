@@ -345,7 +345,6 @@ jobs:
       with:
         tag_name: ${{ needs.prepare.outputs.release-version }}
         name: ${{ needs.prepare.outputs.release-version }}
-        target_commitish: ${{ needs.prepare.outputs.ref }}
         files: ${{ needs.prepare.outputs.release-binary-filename }}*
 
   test-release:
