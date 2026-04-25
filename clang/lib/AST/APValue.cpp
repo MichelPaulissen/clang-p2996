@@ -21,9 +21,12 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/Type.h"
+#include "clang/Sema/ParsedAttr.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+
 using namespace clang;
 
 /// The identity of a type_info object depends on the canonical unqualified
@@ -565,6 +568,11 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::Annotation:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
+  case ReflectionKind::Attribute: {
+    ParsedAttr* attr = V.getReflectedAttribute();
+    attr->profile(ID);
+    return;
+  }
   case ReflectionKind::DataMemberSpec: {
     TagDataMemberSpec *TDMS = V.getReflectedDataMemberSpec();
     TDMS->Ty.Profile(ID);
@@ -964,10 +972,24 @@ TagDataMemberSpec *APValue::getReflectedDataMemberSpec() const {
           const_cast<void *>(getOpaqueReflectionData()));
 }
 
+EnumeratorSpec *APValue::getReflectedEnumeratorSpec() const {
+  assert(getReflectionKind() == ReflectionKind::EnumeratorSpec &&
+         "not a reflection of a description of an enum for define");
+  return reinterpret_cast<EnumeratorSpec *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
 CXX26AnnotationAttr *APValue::getReflectedAnnotation() const {
   assert(getReflectionKind() == ReflectionKind::Annotation &&
          "not a reflection of an annotation");
   return reinterpret_cast<CXX26AnnotationAttr *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
+ParsedAttr *APValue::getReflectedAttribute() const {
+  assert(getReflectionKind() == ReflectionKind::Attribute &&
+         "not a reflection of an attribute");
+  return reinterpret_cast<ParsedAttr *>(
           const_cast<void *>(getOpaqueReflectionData()));
 }
 
@@ -1327,8 +1349,14 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::DataMemberSpec:
       Repr = "data-member-spec";
       break;
+    case ReflectionKind::EnumeratorSpec:
+      Repr = "enumerator-spec";
+      break;
     case ReflectionKind::Annotation:
       Repr = "annotation";
+      break;
+    case ReflectionKind::Attribute:
+      Repr = "attribute";
       break;
     }
     Out << "^^(" << Repr << ")";
@@ -1667,7 +1695,9 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::Parameter:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::EnumeratorSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Attribute:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;
     return;

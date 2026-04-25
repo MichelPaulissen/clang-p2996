@@ -13,15 +13,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "TypeLocBuilder.h"
+#include "clang/AST/APValue.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/MetaActions.h"
 #include "clang/AST/Metafunction.h"
+#include "clang/AST/Reflection.h"
+#include "clang/AST/Type.h"
+#include "clang/Basic/AttributeCommonInfo.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Lookup.h"
+#include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/ParsedTemplate.h"
+#include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
@@ -487,6 +493,85 @@ public:
     return Result.get();
   }
 
+  EnumDecl *DefineEnum(EnumDecl *ED, SmallVector<EnumeratorSpec *, 8> EnumSpecs,
+                       Decl *ContainingDecl, QualType TargetEnumType,
+                       const ParsedAttributesView *Attrs,
+                       SourceLocation DefinitionLoc) override {
+    // Copypasta from define_aggregate, seems aplicable enough
+    class RestoreDeclContextTy {
+      Sema &S;
+      DeclContext *DC;
+    public:
+      RestoreDeclContextTy(Sema &S) : S(S), DC(S.CurContext) {}
+      ~RestoreDeclContextTy() { S.CurContext = DC; }
+    } RestoreDC(S);
+
+    // We set the context (Sema) to be the one where the enum was declared
+    S.CurContext = ED->getDeclContext();
+
+    Scope EnumScope(S.getCurScope(), Scope::EnumScope | Scope::DeclScope, S.Diags);
+    ED->startDefinition();
+    S.ActOnTagStartDefinition(&EnumScope, ED);
+
+    Decl* LastEnumConstDecl = nullptr;
+    SmallVector<Decl *, 32> EnumConstantDecls;
+    for (const auto &enumSpec : EnumSpecs) {
+      IdentifierInfo *II = &(S.Context.Idents.get(enumSpec->name));
+      Expr *Val = enumSpec->hasValue
+                      ? IntegerLiteral::Create(
+                            S.Context, llvm::APSInt::get(enumSpec->val),
+                            S.Context.getSizeType(), DefinitionLoc)
+                      : nullptr;
+      ParsedAttributesView attrs;
+      for (APValue * attr: enumSpec->attributes) {
+        attrs.addAtEnd(attr->getReflectedAttribute());
+      }
+      Decl *EnumConstDecl =
+          S.ActOnEnumConstant(&EnumScope, ED, LastEnumConstDecl, DefinitionLoc,
+                              II, attrs, DefinitionLoc, Val);
+
+      // Attach annotations as CXX26AnnotationAttr directly on the decl.
+      for (APValue *annotVal : enumSpec->annotations) {
+        Expr *OVE = new (S.Context) OpaqueValueExpr(
+            DefinitionLoc,
+            annotVal->getTypeOfReflectedResult(S.Context),
+            VK_PRValue);
+        Expr *CE = ConstantExpr::Create(S.Context, OVE,
+                                        annotVal->getReflectedValue());
+
+        AttributeFactory AttrFactory;
+        ParsedAttributes ParsedAttrs(AttrFactory);
+        SourceRange Range(DefinitionLoc, DefinitionLoc);
+        IdentifierInfo &AnnotII = S.Context.Idents.get("__annotation_placeholder");
+        AttributeCommonInfo *ACI = ParsedAttrs.addNew(
+            &AnnotII, Range, {}, nullptr, 0,
+            ParsedAttr::Form::Annotation(), DefinitionLoc);
+
+        auto *Annot = CXX26AnnotationAttr::Create(S.Context, CE, *ACI);
+        Annot->setValue(annotVal->getReflectedValue());
+        Annot->setEqLoc(DefinitionLoc);
+        EnumConstDecl->addAttr(Annot);
+      }
+
+      EnumConstantDecls.push_back(EnumConstDecl);
+      LastEnumConstDecl = EnumConstDecl;
+    }
+
+    S.ActOnEnumBody(DefinitionLoc, SourceRange{}, ED, EnumConstantDecls,
+                    &EnumScope, {});
+
+
+    S.ActOnPopScope(DefinitionLoc, &EnumScope);
+    S.ActOnTagFinishDefinition(S.getCurScope(), ED, DefinitionLoc);
+
+    // If this enum is a member of a template instantiation, mark it as explicitly specialized
+    // define_enum provides its own definition rather than inheriting one from the template pattern
+    if (ED->getMemberSpecializationInfo()) {
+      ED->setTemplateSpecializationKind(TSK_ExplicitSpecialization, DefinitionLoc);
+    }
+    return ED;
+  }
+
   CXXRecordDecl *DefineAggregate(CXXRecordDecl *IncompleteDecl,
                                  ArrayRef<TagDataMemberSpec *> MemberSpecs,
                                  Decl *ContainingDecl,
@@ -680,6 +765,10 @@ public:
         SourceRange Range(DefinitionLoc, DefinitionLoc);
         MemberAttrs.addAtEnd(AttrPool.create(&II, Range, {}, nullptr, 0,
                                              ParsedAttr::Form::CXX11()));
+      }
+
+      for (ParsedAttr *PA : MemberSpec->Attributes) {
+        MemberAttrs.addAtEnd(PA);
       }
 
       // Create declarator for the member.
@@ -979,6 +1068,11 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
 ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
                                      CXXSpliceExpr *E) {
   return BuildCXXReflectExpr(OperatorLoc, E);
+}
+
+ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
+                                     ParsedAttr *A) {
+  return BuildCXXReflectExpr(OperatorLoc, A);
 }
 
 /// Returns an expression representing the result of a metafunction operating
@@ -1338,6 +1432,13 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                 ER.Val);
 }
 
+ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
+                                     ParsedAttr *A) {
+  return CXXReflectExpr::Create(
+      Context, OperatorLoc, A->getRange(),
+      APValue{ReflectionKind::Attribute, static_cast<void *>(A)});
+}
+
 ExprResult Sema::BuildCXXMetafunctionExpr(
       SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc,
       unsigned MetaFnID, const CXXMetafunctionExpr::ImplFn &Impl,
@@ -1536,6 +1637,32 @@ QualType Sema::BuildReflectionSpliceTypeLoc(TypeLocBuilder &TLB,
   return SpliceTy;
 }
 
+static ValueDecl *normalizeSplicedMemberDecl(ValueDecl *VD) {
+  auto *FD = dyn_cast_or_null<FieldDecl>(VD);
+  if (!FD)
+    return VD;
+
+  auto *InnerRD = dyn_cast<RecordDecl>(FD->getDeclContext());
+  if (!InnerRD || !InnerRD->isAnonymousStructOrUnion())
+    return VD;
+
+  // Walk up through anonymous records; the injected decl we want lives in the
+  // first non-anonymous containing record.
+  DeclContext *DC = InnerRD->getDeclContext();
+  auto *OuterRD = dyn_cast<CXXRecordDecl>(DC);
+  while (OuterRD && OuterRD->isAnonymousStructOrUnion()) {
+    DC = OuterRD->getDeclContext();
+    OuterRD = dyn_cast<CXXRecordDecl>(DC);
+  }
+  if (!OuterRD)
+    return VD;
+
+  if (IndirectFieldDecl *IFD = Sema::findInjectedIndirectField(OuterRD, FD))
+    return IFD;
+
+  return VD;
+}
+
 ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
                                            SpliceSpecifier *Splice,
                                            bool AllowMemberReference) {
@@ -1593,12 +1720,12 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
       if (auto *VD = dyn_cast<VarDecl>(TheDecl);
           VD && CheckSpliceVar(*this, VD, Splice->getSourceRange()))
         return ExprError();
+      auto * VD = normalizeSplicedMemberDecl(cast<ValueDecl>(TheDecl));
 
       // Create a new DeclRefExpr, since the operand of the reflect expression
       // was parsed in an unevaluated context (but a splice expression is not
       // necessarily, and frequently not, in such a context).
-      Result = CreateRefToDecl(*this, cast<ValueDecl>(TheDecl),
-                               Splice->getBeginLoc());
+      Result = CreateRefToDecl(*this, VD, Splice->getBeginLoc());
       MarkDeclRefReferenced(cast<DeclRefExpr>(Result), nullptr);
       Result = CXXSpliceExpr::Create(Context, Result->getValueKind(),
                                      TemplateKWLoc, Splice, Result,
@@ -1712,6 +1839,7 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:
+    case ReflectionKind::Attribute:
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice)
           << 1 << Splice->getSourceRange();
@@ -1848,6 +1976,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::Attribute:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;
     return nullptr;

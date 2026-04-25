@@ -40,6 +40,7 @@ template <typename T> class BasicReaderBase;
   class Expr;
   class FieldDecl;
   class NamespaceDecl;
+  class ParsedAttr;
   class ParmVarDecl;
   struct PrintingPolicy;
   class Type;
@@ -329,7 +330,7 @@ private:
   DataType Data;
 
   // A reflection can represent a value, but is also -itself- a value.
-  // 
+  //
   // When 'ReflectionDepth' is nonzero 'N', the APValue represents the otherwise
   // described value with N "layers of reflection" over it. The otherwise
   // equivalent APValue for which ReflectionDepth is zero is referred to as the
@@ -576,8 +577,16 @@ public:
     return isReflection() &&
            getReflectionKind() == ReflectionKind::DataMemberSpec;
   }
+  bool isReflectedEnumMemberSpec() const {
+    return isReflection() &&
+          getReflectionKind() == ReflectionKind::EnumeratorSpec;
+  }
   bool isReflectedAnnotation() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
+  }
+
+  bool isReflectedAttribute() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::Attribute;
   }
 
   void dump() const;
@@ -770,7 +779,9 @@ public:
   ParmVarDecl *getReflectedParameter() const;
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
+  EnumeratorSpec *getReflectedEnumeratorSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
+  ParsedAttr *getReflectedAttribute() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");
