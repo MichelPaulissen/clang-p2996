@@ -2173,7 +2173,10 @@ void MicrosoftCXXNameMangler::mangleTemplateArgValue(QualType T,
   }
 
   case APValue::Reflection:
-    llvm_unreachable("reflection arguments should be separately handled");
+    if (WithScalarType)
+      mangleType(T, SourceRange(), QMM_Escape);
+    mangleReflection(V);
+    return;
   }
 }
 
@@ -2202,16 +2205,79 @@ void MicrosoftCXXNameMangler::mangleReflection(const APValue &R) {
     break;
   }
   case ReflectionKind::Object:
+    Out << 'o';
+    {
+      QualType QT = R.getTypeOfReflectedResult(getASTContext());
+      if (!QT->isReferenceType())
+        QT = getASTContext().getLValueReferenceType(QT);
+      mangleTemplateArgValue(QT, R.getReflectedObject(),
+                             TplArgKind::StructuralValue,
+                             /*WithScalarType=*/true);
+    }
+    break;
   case ReflectionKind::Value:
+    Out << 'v';
+    mangleTemplateArgValue(R.getTypeOfReflectedResult(getASTContext()),
+                           R.getReflectedValue(), TplArgKind::StructuralValue,
+                           /*WithScalarType=*/true);
+    break;
   case ReflectionKind::Declaration:
+    Out << 'd';
+    {
+      Decl *D = R.getReflectedDecl();
+      if (auto *ED = dyn_cast<EnumConstantDecl>(D)) {
+        mangleIntegerLiteral(ED->getInitVal());
+      } else if (auto *CD = dyn_cast<CXXConstructorDecl>(D)) {
+        mangle(GlobalDecl(CD, Ctor_Complete));
+      } else if (auto *DD = dyn_cast<CXXDestructorDecl>(D)) {
+        mangle(GlobalDecl(DD, Dtor_Complete));
+      } else {
+        mangleName(cast<NamedDecl>(D));
+      }
+    }
+    break;
   case ReflectionKind::Template:
+    Out << 't';
+    mangleName(R.getReflectedTemplate().getAsTemplateDecl()->getTemplatedDecl());
+    break;
   case ReflectionKind::Namespace:
+    Out << 'n';
+    if (auto *ND = dyn_cast<NamedDecl>(R.getReflectedNamespace()))
+      mangleName(ND);
+    else
+      Out << '@';
+    break;
   case ReflectionKind::EntityProxy:
+    Out << 'a';
+    mangleName(R.getReflectedEntityProxy());
+    break;
   case ReflectionKind::Parameter:
+    Out << 'p';
+    if (const auto *PVD = R.getReflectedParameter())
+      mangleName(PVD);
+    break;
   case ReflectionKind::BaseSpecifier:
+    Out << 'b';
+    Context.mangleCanonicalTypeName(R.getReflectedBaseSpecifier()->getType(),
+                                    Out, false);
+    break;
   case ReflectionKind::DataMemberSpec:
+    Out << "sdm";
+    {
+      TagDataMemberSpec *TDMS = R.getReflectedDataMemberSpec();
+      Context.mangleCanonicalTypeName(TDMS->Ty, Out, false);
+      if (TDMS->Name)
+        Out << "N$" << (*TDMS->Name) << '$';
+      if (TDMS->Alignment)
+        Out << 'A' << (*TDMS->Alignment);
+      if (TDMS->BitWidth)
+        Out << 'B' << (*TDMS->BitWidth);
+    }
+    break;
   case ReflectionKind::Annotation:
-    llvm_unreachable("unimplemented");
+    Out << 'a';
+    mangleExpression(R.getReflectedAnnotation()->getArg(), nullptr);
+    break;
   }
   Out << 'E';
 }
